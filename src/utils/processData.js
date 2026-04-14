@@ -204,6 +204,43 @@ export function processFiles(parsedArrays) {
   return cleaned;
 }
 
+// Detecta se o arquivo contém ativos, inativos ou ambos
+// Heurística: usa a coluna "Dias Inativo(s)" com corte de 30 dias (padrão plataforma).
+// - 100% rows > 30 dias → "inativos"
+// - 100% rows ≤ 30 dias → "ativos"
+// - misto → "ambos"
+export function detectFileType(rows) {
+  const valid = (rows || []).filter((r) =>
+    Object.values(r).some((v) => v != null && String(v).trim() !== '')
+  );
+  if (valid.length === 0) return { tipo: 'vazio', total: 0, ativos: 0, inativos: 0 };
+
+  const normalizedKeys = Object.keys(valid[0]).map((k) => [k, normalize(k)]);
+  let ativos = 0;
+  let inativos = 0;
+  let semDado = 0;
+
+  for (const row of valid) {
+    const raw = getCol(row, normalizedKeys, COL_MAP.diasInativos);
+    if (raw == null || String(raw).trim() === '' || String(raw).trim() === '-') {
+      semDado++;
+      continue;
+    }
+    const dias = parseNumSafe(raw);
+    if (dias > 30) inativos++;
+    else ativos++;
+  }
+
+  const total = valid.length;
+  let tipo;
+  if (semDado === total) tipo = 'desconhecido';
+  else if (inativos === 0) tipo = 'ativos';
+  else if (ativos === 0) tipo = 'inativos';
+  else tipo = 'ambos';
+
+  return { tipo, total, ativos, inativos, semDado };
+}
+
 // Parse genérico: CSV ou Excel
 export function parseFile(file) {
   const name = file.name.toLowerCase();

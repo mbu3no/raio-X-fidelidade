@@ -1,22 +1,51 @@
-import { Upload, FileSpreadsheet, Loader2, Zap, Sun, Moon } from 'lucide-react';
+import { Upload, FileSpreadsheet, Loader2, Zap, Sun, Moon, CheckCircle2, AlertCircle, Users } from 'lucide-react';
 import { useState, useRef } from 'react';
+import { parseFile, detectFileType } from '../utils/processData';
+
+const TIPO_META = {
+  ativos:       { label: 'Ativos',    color: '#10b981', Icon: CheckCircle2 },
+  inativos:     { label: 'Inativos',  color: '#f59e0b', Icon: AlertCircle },
+  ambos:        { label: 'Ativos + Inativos', color: '#a78bfa', Icon: Users },
+  desconhecido: { label: 'Tipo não identificado', color: '#94a3b8', Icon: AlertCircle },
+  vazio:        { label: 'Arquivo vazio', color: '#ef4444', Icon: AlertCircle },
+  erro:         { label: 'Erro ao ler',   color: '#ef4444', Icon: AlertCircle },
+};
 
 export default function UploadScreen({ onFilesReady, theme, onToggleTheme }) {
-  const [files, setFiles] = useState([]);
+  const [files, setFiles] = useState([]); // { file, detect: {tipo,total,ativos,inativos} | null }
   const [loading, setLoading] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const inputRef = useRef();
 
+  async function addFiles(list) {
+    const valid = [...list].filter((f) => /\.(csv|xlsx|xls)$/i.test(f.name));
+    const entries = valid.map((file) => ({ file, detect: null }));
+    setFiles((prev) => [...prev, ...entries]);
+
+    // Detecta tipo em paralelo
+    entries.forEach(async (entry) => {
+      try {
+        const rows = await parseFile(entry.file);
+        const detect = detectFileType(rows);
+        setFiles((prev) =>
+          prev.map((e) => (e.file === entry.file ? { ...e, detect } : e))
+        );
+      } catch {
+        setFiles((prev) =>
+          prev.map((e) => (e.file === entry.file ? { ...e, detect: { tipo: 'erro', total: 0 } } : e))
+        );
+      }
+    });
+  }
+
   function handleDrop(e) {
     e.preventDefault();
     setDragOver(false);
-    const csvFiles = [...e.dataTransfer.files].filter((f) => /\.(csv|xlsx|xls)$/i.test(f.name));
-    setFiles((prev) => [...prev, ...csvFiles]);
+    addFiles(e.dataTransfer.files);
   }
 
   function handleSelect(e) {
-    const csvFiles = [...e.target.files].filter((f) => /\.(csv|xlsx|xls)$/i.test(f.name));
-    setFiles((prev) => [...prev, ...csvFiles]);
+    addFiles(e.target.files);
   }
 
   function removeFile(index) {
@@ -27,7 +56,7 @@ export default function UploadScreen({ onFilesReady, theme, onToggleTheme }) {
     if (files.length === 0) return;
     setLoading(true);
     try {
-      await onFilesReady(files);
+      await onFilesReady(files.map((e) => e.file));
     } catch {
       setLoading(false);
     }
@@ -94,24 +123,55 @@ export default function UploadScreen({ onFilesReady, theme, onToggleTheme }) {
 
         {files.length > 0 && (
           <div className="mt-4 sm:mt-5 space-y-2 animate-fade-up">
-            {files.map((f, i) => (
-              <div key={i} className="glass-card flex items-center justify-between rounded-xl px-3 sm:px-4 py-2.5 sm:py-3 gap-2">
-                <div className="flex items-center gap-2 sm:gap-3 text-sm min-w-0">
-                  <FileSpreadsheet className="w-4 h-4 text-emerald-400 shrink-0" />
-                  <span className="font-medium truncate" style={{ color: 'var(--text-primary)' }}>{f.name}</span>
-                  <span className="font-mono-num text-xs shrink-0" style={{ color: 'var(--text-muted)' }}>
-                    {(f.size / 1024).toFixed(0)} KB
-                  </span>
+            {files.map((entry, i) => {
+              const f = entry.file;
+              const d = entry.detect;
+              const meta = d ? TIPO_META[d.tipo] : null;
+              const BadgeIcon = meta?.Icon;
+              return (
+                <div key={i} className="glass-card rounded-xl px-3 sm:px-4 py-2.5 sm:py-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2 sm:gap-3 text-sm min-w-0">
+                      <FileSpreadsheet className="w-4 h-4 text-emerald-400 shrink-0" />
+                      <span className="font-medium truncate" style={{ color: 'var(--text-primary)' }}>{f.name}</span>
+                      <span className="font-mono-num text-xs shrink-0" style={{ color: 'var(--text-muted)' }}>
+                        {(f.size / 1024).toFixed(0)} KB
+                      </span>
+                    </div>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); removeFile(i); }}
+                      className="hover:text-red-400 text-xs transition-colors min-w-[44px] min-h-[44px] flex items-center justify-center shrink-0"
+                      style={{ color: 'var(--text-muted)' }}
+                    >
+                      Remover
+                    </button>
+                  </div>
+                  <div className="mt-2 flex items-center gap-2 flex-wrap">
+                    {!d ? (
+                      <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-[11px] font-medium"
+                        style={{ background: 'var(--surface-2)', color: 'var(--text-muted)' }}>
+                        <Loader2 className="w-3 h-3 animate-spin" />
+                        Analisando...
+                      </span>
+                    ) : (
+                      <>
+                        <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-[11px] font-semibold"
+                          style={{ background: `${meta.color}1a`, color: meta.color, border: `1px solid ${meta.color}40` }}>
+                          <BadgeIcon className="w-3 h-3" />
+                          {meta.label}
+                        </span>
+                        {d.total > 0 && (
+                          <span className="font-mono-num text-[11px]" style={{ color: 'var(--text-muted)' }}>
+                            {d.total} registros
+                            {d.tipo === 'ambos' && ` • ${d.ativos} ativos / ${d.inativos} inativos`}
+                          </span>
+                        )}
+                      </>
+                    )}
+                  </div>
                 </div>
-                <button
-                  onClick={(e) => { e.stopPropagation(); removeFile(i); }}
-                  className="hover:text-red-400 text-xs transition-colors min-w-[44px] min-h-[44px] flex items-center justify-center shrink-0"
-                  style={{ color: 'var(--text-muted)' }}
-                >
-                  Remover
-                </button>
-              </div>
-            ))}
+              );
+            })}
 
             <button
               onClick={handleProcess}
